@@ -320,3 +320,18 @@ class RecipeViewSet(viewsets.ModelViewSet):
         ).data
         headers = self.get_success_headers(serializer.data)
         return Response(data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        """Обновить рецепт и вернуть ответ по схеме RecipeListSerializer."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial, context={'request': request})
+        try:
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+        except ValidationError as exc:
+            return Response({'errors': exc.detail}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response({'errors': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        data = RecipeListSerializer(serializer.instance, context={'request': request}).data
+        return Response(data, status=status.HTTP_200_OK)

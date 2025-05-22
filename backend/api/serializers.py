@@ -38,15 +38,11 @@ class CustomUserCreateSerializer(UserCreateSerializer):
         validators=[
             RegexValidator(
                 regex=r'^[\w.@+-]+$',
-                message=(
-                    'Некорректный username. Разрешены буквы, цифры и ./@/+/-.',
-                ),
+                message='Некорректный username. Разрешены буквы, цифры и ./@/+/-.',
             ),
             UniqueValidator(
                 queryset=User.objects.all(),
-                message=(
-                    'Пользователь с таким username уже существует.'
-                ),
+                message='Пользователь с таким username уже существует.'
             ),
         ],
     )
@@ -76,7 +72,8 @@ class CustomUserCreateSerializer(UserCreateSerializer):
         extra_kwargs = {'password': {'write_only': True}}
 
     def validate_username(self, value):
-        """Валидация username: длина, запрещённые значения."""
+        """Валидация username: длина, запрещённые значения и регулярное выражение."""
+        import re
         if len(value) > 150:
             raise serializers.ValidationError(
                 'Имя пользователя не может быть длиннее 150 символов.'
@@ -84,6 +81,16 @@ class CustomUserCreateSerializer(UserCreateSerializer):
         if value.lower() == 'me':
             raise serializers.ValidationError(
                 'Имя пользователя "me" запрещено.'
+            )
+        # Проверка регулярного выражения
+        if not re.match(r'^[\w.@+-]+$', value):
+            raise serializers.ValidationError(
+                'Некорректный username. Разрешены буквы, цифры и ./@/+/-.',
+            )
+        # Проверка уникальности
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError(
+                'Пользователь с таким username уже существует.'
             )
         return value
 
@@ -142,14 +149,14 @@ class CustomUserSerializer(UserSerializer):
         )
 
     def get_avatar(self, obj):
-        """Возвращает абсолютный URL аватара или null."""
+        """Возвращает абсолютный URL аватара или пустую строку."""
         request = self.context.get('request')
         if obj.avatar:
             url = obj.avatar.url if hasattr(obj.avatar, 'url') else obj.avatar
             if request:
                 return request.build_absolute_uri(url)
             return url
-        return None
+        return ""
 
     def get_is_subscribed(self, obj):
         """Возвращает статус подписки (True/False)."""
@@ -161,15 +168,15 @@ class CustomUserSerializer(UserSerializer):
     def to_representation(self, instance):
         """Гарантирует строгую структуру и значения по умолчанию."""
         data = super().to_representation(instance)
-        # avatar: всегда абсолютный url или null
-        if 'avatar' not in data or not data['avatar']:
-            data['avatar'] = None
+        # avatar: всегда абсолютный url или пустая строка
+        if 'avatar' not in data or data['avatar'] is None:
+            data['avatar'] = ""
         # is_subscribed: всегда bool
         data['is_subscribed'] = bool(data.get('is_subscribed', False))
         # Все обязательные поля присутствуют
         for field in self.Meta.fields:
             if field not in data:
-                data[field] = None
+                data[field] = "" if field == 'avatar' else None
         return data
 
 
@@ -271,7 +278,6 @@ class RecipeShortSerializer(serializers.ModelSerializer):
 
 class RecipeListSerializer(serializers.ModelSerializer):
     """Сериализатор для списка рецептов."""
-    tags = TagSerializer(many=True, read_only=True)
     author = CustomUserSerializer(read_only=True)
     ingredients = RecipeIngredientSerializer(
         source='recipeingredient_set',
@@ -286,7 +292,6 @@ class RecipeListSerializer(serializers.ModelSerializer):
         model = Recipe
         fields = (
             'id',
-            'tags',
             'author',
             'ingredients',
             'is_favorited',
@@ -324,10 +329,13 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
     """Сериализатор для создания и обновления рецепта."""
     tags = serializers.PrimaryKeyRelatedField(
         queryset=Tag.objects.all(),
-        many=True
+        many=True,
+        required=False
     )
     author = CustomUserSerializer(read_only=True)
-    ingredients = AddIngredientSerializer(many=True)
+    ingredients = AddIngredientSerializer(many=True, write_only=True)
+    # Для вывода используем правильный сериализатор
+    ingredients_out = RecipeIngredientSerializer(source='recipeingredient_set', many=True, read_only=True)
     image = Base64ImageField()
 
     class Meta:
@@ -336,7 +344,8 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
             'id',
             'tags',
             'author',
-            'ingredients',
+            'ingredients_out',  # для вывода
+            'ingredients',      # для записи
             'name',
             'image',
             'text',
@@ -354,10 +363,9 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'ingredients': ['Ингредиенты не могут повторяться!']}
             )
-        tags = data.get('tags')
-        if not tags:
-            raise serializers.ValidationError({'tags': ['Добавьте минимум один тег!']})
-        if len(tags) != len(set(tags)):
+        tags = data.get('tags', [])
+        # Убираем обязательность tags
+        if tags and len(tags) != len(set(tags)):
             raise serializers.ValidationError({'tags': ['Теги не могут повторяться!']})
         cooking_time = data.get('cooking_time')
         if cooking_time is None or int(cooking_time) < 1:
@@ -370,10 +378,14 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        tags = validated_data.pop('tags')
+        tags = validated_data.pop('tags', [])
         ingredients_data = validated_data.pop('ingredients')
-        recipe = Recipe.objects.create(**validated_data)
-        recipe.tags.set(tags)
+        # Устанавливаем автора из контекста запроса
+        request = self.context.get('request')
+        author = request.user if request and request.user.is_authenticated else None
+        recipe = Recipe.objects.create(author=author, **validated_data)
+        if tags:
+            recipe.tags.set(tags)
         for ingredient in ingredients_data:
             ingredient_obj = Ingredient.objects.get(id=ingredient['id'])
             RecipeIngredient.objects.create(

@@ -78,8 +78,10 @@ class UserViewSet(DjoserUserViewSet):
 
     @action(detail=True, methods=['post', 'delete'], url_path='subscribe')
     @handle_api_errors
-    def subscribe(self, request, pk=None):
+    def subscribe(self, request, pk=None, id=None):
         """Создать/удалить подписку на автора."""
+        if pk is None and id is not None:
+            pk = id
         author = get_object_or_404(User, id=pk)
         user = request.user
 
@@ -94,7 +96,10 @@ class UserViewSet(DjoserUserViewSet):
 
             # Создание подписки
             Follow.objects.create(user=user, author=author)
-            serializer = self.get_serializer(author)
+            from api.serializers import SubscriptionSerializer
+            serializer = SubscriptionSerializer(
+                author, context={'request': request}
+            )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         # DELETE request
@@ -109,16 +114,17 @@ class UserViewSet(DjoserUserViewSet):
         """Возвращает список подписок пользователя."""
         user = request.user
         follows = Follow.objects.filter(user=user).select_related('author')
-        page = self.paginate_queryset(follows)
-        from api.serializers import FollowSerializer
-        serializer_class = FollowSerializer
+        authors = [follow.author for follow in follows]
+        page = self.paginate_queryset(authors)
+        from api.serializers import SubscriptionSerializer
+        serializer_class = SubscriptionSerializer
         if page is not None:
             serializer = serializer_class(
                 page, many=True, context={'request': request}
             )
             return self.get_paginated_response(serializer.data)
         serializer = serializer_class(
-            follows, many=True, context={'request': request}
+            authors, many=True, context={'request': request}
         )
         return Response(serializer.data)
 
@@ -136,7 +142,7 @@ class UserViewSet(DjoserUserViewSet):
             )
         if request.method == 'DELETE':
             request.user.avatar = None
-            request.user.save()
+            request.user.save(update_fields=['avatar'])
             return Response(status=status.HTTP_204_NO_CONTENT)
         avatar_data = request.data.get('avatar')
         if not avatar_data:
@@ -162,7 +168,8 @@ class UserViewSet(DjoserUserViewSet):
         user_data = CustomUserSerializer(
             request.user, context={'request': request}
         ).data
-        return Response(user_data, status=status.HTTP_200_OK)
+        # Возвращаем только avatar согласно схеме
+        return Response({"avatar": user_data["avatar"]}, status=status.HTTP_200_OK)
 
     def create(self, request):
         """Создает нового пользователя.
