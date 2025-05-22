@@ -1,9 +1,6 @@
-#!/bin/bash
-
 python manage.py migrate
 python manage.py collectstatic --no-input
 
-# Import ingredients data if it doesn't exist
 echo "Checking if ingredients need to be imported..."
 INGREDIENT_COUNT=$(python manage.py shell -c "from recipes.models import Ingredient; print(Ingredient.objects.count())")
 if [ "$INGREDIENT_COUNT" -eq "0" ]; then
@@ -17,11 +14,9 @@ if [ "$INGREDIENT_COUNT" -eq "0" ]; then
     fi
 fi
 
-# Create superuser if specified in environment
 if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]
 then
     python manage.py createsuperuser --noinput
 fi
 
-# Start Gunicorn
 exec gunicorn foodgram.wsgi:application --bind 0.0.0.0:8000

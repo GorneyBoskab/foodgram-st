@@ -37,7 +37,7 @@ class IngredientViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = (AllowAny,)
     filter_backends = (DjangoFilterBackend,)
     filterset_class = IngredientFilter
-    pagination_class = None  # Disable pagination for ingredients
+    pagination_class = None
 
     def retrieve(self, request, *args, **kwargs):
         pk = kwargs.get('pk')
@@ -149,14 +149,12 @@ class RecipeViewSet(viewsets.ModelViewSet):
     def favorite(self, request, pk=None):
         """Добавить или удалить рецепт из избранного."""
         if request.method == 'POST':
-            # Проверка на существование рецепта
             recipe = Recipe.objects.filter(id=pk).first()
             if not recipe:
                 return Response(
                     {"errors": "Рецепт не найден"},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            # Проверка на дублирование
             if Favorite.objects.filter(
                 user=request.user, recipe=recipe
             ).exists():
@@ -169,7 +167,6 @@ class RecipeViewSet(viewsets.ModelViewSet):
                 recipe, context={'request': request}
             )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-        # DELETE
         recipe = Recipe.objects.filter(id=pk).first()
         if not recipe:
             return Response(

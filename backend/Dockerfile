@@ -13,7 +13,6 @@ RUN apt-get update && \
 
 COPY . .
 
-# Make our entrypoint script executable
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

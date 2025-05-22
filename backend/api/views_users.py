@@ -46,7 +46,6 @@ class UserViewSet(DjoserUserViewSet):
             request.user, context={'request': request}
         )
         data = serializer.data
-        # Гарантируем, что avatar всегда строка (абсолютный URL) или null
         if 'avatar' not in data or data['avatar'] is None:
             data['avatar'] = None
         return Response(data)
@@ -86,15 +85,12 @@ class UserViewSet(DjoserUserViewSet):
         user = request.user
 
         if request.method == 'POST':
-            # Проверка на самоподписку
             if user == author:
                 raise CannotSubscribeToYourself()
 
-            # Проверка на существование подписки
             if Follow.objects.filter(user=user, author=author).exists():
                 raise AlreadySubscribed()
 
-            # Создание подписки
             Follow.objects.create(user=user, author=author)
             from api.serializers import SubscriptionSerializer
             serializer = SubscriptionSerializer(
@@ -102,7 +98,6 @@ class UserViewSet(DjoserUserViewSet):
             )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        # DELETE request
         subscription = Follow.objects.filter(user=user, author=author)
         if not subscription.exists():
             raise NotSubscribed()
@@ -168,7 +163,6 @@ class UserViewSet(DjoserUserViewSet):
         user_data = CustomUserSerializer(
             request.user, context={'request': request}
         ).data
-        # Возвращаем только avatar согласно схеме
         return Response({"avatar": user_data["avatar"]}, status=status.HTTP_200_OK)
 
     def create(self, request):

@@ -82,12 +82,10 @@ class CustomUserCreateSerializer(UserCreateSerializer):
             raise serializers.ValidationError(
                 'Имя пользователя "me" запрещено.'
             )
-        # Проверка регулярного выражения
         if not re.match(r'^[\w.@+-]+$', value):
             raise serializers.ValidationError(
                 'Некорректный username. Разрешены буквы, цифры и ./@/+/-.',
             )
-        # Проверка уникальности
         if User.objects.filter(username=value).exists():
             raise serializers.ValidationError(
                 'Пользователь с таким username уже существует.'
@@ -168,12 +166,9 @@ class CustomUserSerializer(UserSerializer):
     def to_representation(self, instance):
         """Гарантирует строгую структуру и значения по умолчанию."""
         data = super().to_representation(instance)
-        # avatar: всегда абсолютный url или пустая строка
         if 'avatar' not in data or data['avatar'] is None:
             data['avatar'] = ""
-        # is_subscribed: всегда bool
         data['is_subscribed'] = bool(data.get('is_subscribed', False))
-        # Все обязательные поля присутствуют
         for field in self.Meta.fields:
             if field not in data:
                 data[field] = "" if field == 'avatar' else None
@@ -344,8 +339,8 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
             'id',
             'tags',
             'author',
-            'ingredients_out',  # для вывода
-            'ingredients',      # для записи
+            'ingredients_out',
+            'ingredients',
             'name',
             'image',
             'text',
@@ -364,7 +359,6 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
                 {'ingredients': ['Ингредиенты не могут повторяться!']}
             )
         tags = data.get('tags', [])
-        # Убираем обязательность tags
         if tags and len(tags) != len(set(tags)):
             raise serializers.ValidationError({'tags': ['Теги не могут повторяться!']})
         cooking_time = data.get('cooking_time')
@@ -380,7 +374,6 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         tags = validated_data.pop('tags', [])
         ingredients_data = validated_data.pop('ingredients')
-        # Устанавливаем автора из контекста запроса
         request = self.context.get('request')
         author = request.user if request and request.user.is_authenticated else None
         recipe = Recipe.objects.create(author=author, **validated_data)
