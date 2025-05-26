@@ -13,6 +13,14 @@ from djoser.serializers import UserCreateSerializer, UserSerializer
 from recipes.models import (Ingredient, Tag, Recipe, RecipeIngredient,
                            Favorite, ShoppingCart)
 from users.models import User, Follow
+from .constants import (
+    MIN_INGREDIENT_AMOUNT,
+    MIN_COOKING_TIME,
+    MAX_LENGTH_USERNAME,
+    MAX_LENGTH_EMAIL,
+    MAX_LENGTH_FIRST_NAME,
+    MAX_LENGTH_LAST_NAME,
+)
 
 
 class Base64ImageField(serializers.ImageField):
@@ -34,7 +42,7 @@ class CustomUserCreateSerializer(UserCreateSerializer):
     """Сериализатор для создания пользователя (только для регистрации)."""
     avatar = Base64ImageField(required=False, allow_null=True)
     username = serializers.CharField(
-        max_length=150,
+        max_length=MAX_LENGTH_USERNAME,
         validators=[
             RegexValidator(
                 regex=r'^[\w.@+-]+$',
@@ -42,21 +50,19 @@ class CustomUserCreateSerializer(UserCreateSerializer):
             ),
             UniqueValidator(
                 queryset=User.objects.all(),
-                message='Пользователь с таким username уже существует.'
-            ),
+                message='Пользователь с таким username уже существует.'            ),
         ],
     )
     email = serializers.EmailField(
-        max_length=254,
+        max_length=MAX_LENGTH_EMAIL,
         validators=[
             UniqueValidator(
                 queryset=User.objects.all(),
-                message='Пользователь с таким email уже существует.'
-            )
+                message='Пользователь с таким email уже существует.'            )
         ],
     )
-    first_name = serializers.CharField(max_length=150)
-    last_name = serializers.CharField(max_length=150)
+    first_name = serializers.CharField(max_length=MAX_LENGTH_FIRST_NAME)
+    last_name = serializers.CharField(max_length=MAX_LENGTH_LAST_NAME)
 
     class Meta:
         model = User
@@ -74,7 +80,7 @@ class CustomUserCreateSerializer(UserCreateSerializer):
     def validate_username(self, value):
         """Валидация username: длина, запрещённые значения и регулярное выражение."""
         import re
-        if len(value) > 150:
+        if len(value) > MAX_LENGTH_USERNAME:
             raise serializers.ValidationError(
                 'Имя пользователя не может быть длиннее 150 символов.'
             )
@@ -94,7 +100,7 @@ class CustomUserCreateSerializer(UserCreateSerializer):
 
     def validate_email(self, value):
         """Валидация email: длина."""
-        if len(value) > 254:
+        if len(value) > MAX_LENGTH_EMAIL:
             raise serializers.ValidationError(
                 'Email не может быть длиннее 254 символов.'
             )
@@ -102,7 +108,7 @@ class CustomUserCreateSerializer(UserCreateSerializer):
 
     def validate_first_name(self, value):
         """Валидация first_name: длина."""
-        if len(value) > 150:
+        if len(value) > MAX_LENGTH_FIRST_NAME:
             raise serializers.ValidationError(
                 'Имя не может быть длиннее 150 символов.'
             )
@@ -110,7 +116,7 @@ class CustomUserCreateSerializer(UserCreateSerializer):
 
     def validate_last_name(self, value):
         """Валидация last_name: длина."""
-        if len(value) > 150:
+        if len(value) > MAX_LENGTH_LAST_NAME:
             raise serializers.ValidationError(
                 'Фамилия не может быть длиннее 150 символов.'
             )
@@ -242,7 +248,7 @@ class AddIngredientSerializer(serializers.Serializer):
 
     id = serializers.IntegerField()
     amount = serializers.IntegerField(
-        min_value=1,
+        min_value=MIN_INGREDIENT_AMOUNT,
         error_messages={
             'min_value': 'Количество ингредиента должно быть не менее 1.'
         }
@@ -329,7 +335,6 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
     )
     author = CustomUserSerializer(read_only=True)
     ingredients = AddIngredientSerializer(many=True, write_only=True)
-    # Для вывода используем правильный сериализатор
     ingredients_out = RecipeIngredientSerializer(source='recipeingredient_set', many=True, read_only=True)
     image = Base64ImageField()
 
@@ -362,7 +367,7 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
         if tags and len(tags) != len(set(tags)):
             raise serializers.ValidationError({'tags': ['Теги не могут повторяться!']})
         cooking_time = data.get('cooking_time')
-        if cooking_time is None or int(cooking_time) < 1:
+        if cooking_time is None or int(cooking_time) < MIN_COOKING_TIME:
             raise serializers.ValidationError(
                 {'cooking_time': ['Время приготовления должно быть не менее 1 минуты!']}
             )

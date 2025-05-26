@@ -4,14 +4,15 @@ from django.contrib import admin
 from .models import (
     Ingredient, Tag, Recipe, RecipeIngredient, Favorite, ShoppingCart
 )
+from .constants import ADMIN_MIN_NUM_INGREDIENTS, ADMIN_EXTRA_INGREDIENTS
 
 
 class RecipeIngredientInline(admin.TabularInline):
     """Инлайн модель для ингредиентов в рецепте."""
 
     model = RecipeIngredient
-    min_num = 1
-    extra = 1
+    min_num = ADMIN_MIN_NUM_INGREDIENTS
+    extra = ADMIN_EXTRA_INGREDIENTS
 
 
 @admin.register(Ingredient)

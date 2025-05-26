@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 
+from .constants import DEFAULT_PAGE_SIZE
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = 'django-insecure-olegepjqc4n%kt2q*!p0=jotk%&rgppks6pvaz1io$%-dc0suv'
@@ -114,7 +116,7 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.TokenAuthentication',
     ],
     'DEFAULT_PAGINATION_CLASS': 'api.pagination.CustomPagination',
-    'PAGE_SIZE': 6,
+    'PAGE_SIZE': DEFAULT_PAGE_SIZE,
 }
 
 DJOSER = {
