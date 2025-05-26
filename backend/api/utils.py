@@ -11,10 +11,6 @@ CUSTOM_API_EXCEPTIONS = (
 )
 
 def handle_api_errors(view_func):
-    """
-    Decorator for DRF views to catch custom business exceptions and return
-    {"errors": "..."} with correct status.
-    """
     @functools.wraps(view_func)
     def _wrapped_view(self, request, *args, **kwargs):
         try:

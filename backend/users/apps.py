@@ -1,4 +1,3 @@
-"""Пользователи приложение."""
 from django.apps import AppConfig
 
 

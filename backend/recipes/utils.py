@@ -1,4 +1,3 @@
-"""Utility for working with files and HTTP requests."""
 import os
 import csv
 import json
@@ -12,16 +11,6 @@ from django.shortcuts import get_object_or_404
 
 
 def create_file_from_data(data, file_name, content_type='text/plain'):
-    """Create a file with data.
-
-    Args:
-        data: Any data to write to the file.
-        file_name: Name of the file.
-        content_type: Content type of the file.
-
-    Returns:
-        HttpResponse with the file.
-    """
     response = HttpResponse(content_type=content_type)
     response['Content-Disposition'] = f'attachment; filename="{file_name}"'
     response.write(data)
@@ -29,16 +18,6 @@ def create_file_from_data(data, file_name, content_type='text/plain'):
 
 
 def import_json_data(file_path, model_class, field_mapping=None):
-    """Import data from JSON file to model.
-
-    Args:
-        file_path: Path to JSON file.
-        model_class: Django model class.
-        field_mapping: Dictionary with mapping of fields.
-
-    Returns:
-        Number of imported records.
-    """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f'File {file_path} not found')
 
@@ -60,16 +39,6 @@ def import_json_data(file_path, model_class, field_mapping=None):
 
 
 def import_csv_data(file_path, model_class, field_mapping=None):
-    """Import data from CSV file to model.
-
-    Args:
-        file_path: Path to CSV file.
-        model_class: Django model class.
-        field_mapping: Dictionary with mapping of fields.
-
-    Returns:
-        Number of imported records.
-    """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f'File {file_path} not found')
 

@@ -1,12 +1,11 @@
-"""
-Представления для API."""
+"""Представления для API."""
 from django.db.models import Sum
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from rest_framework.exceptions import APIException, ValidationError
+from django.shortcuts import get_object_or_404
 
 from api.filters import RecipeFilter, IngredientFilter
 from api.pagination import CustomPagination
@@ -21,12 +20,6 @@ from recipes.models import (
     Favorite, ShoppingCart
 )
 from recipes.utils import create_file_from_data
-from api.exceptions import (
-    AlreadyInFavorites, NotInFavorites,
-    AlreadyInShoppingCart, NotInShoppingCart,
-    EmptyShoppingCart
-)
-from api.utils import handle_api_errors
 
 
 class IngredientViewSet(viewsets.ReadOnlyModelViewSet):
@@ -39,19 +32,6 @@ class IngredientViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_class = IngredientFilter
     pagination_class = None
 
-    def retrieve(self, request, *args, **kwargs):
-        pk = kwargs.get('pk')
-        try:
-            if isinstance(pk, str) and ("{{" in pk and "}}" in pk):
-                return Response({"errors": f"Неверный ID ингредиента: {pk}"}, status=status.HTTP_400_BAD_REQUEST)
-            pk = int(pk)
-        except (ValueError, TypeError):
-            return Response({"errors": f"Неверный формат ID ингредиента: {pk}"}, status=status.HTTP_400_BAD_REQUEST)
-        obj = Ingredient.objects.filter(id=pk).first()
-        if not obj:
-            return Response({"errors": "Ингредиент не найден"}, status=status.HTTP_404_NOT_FOUND)
-        serializer = self.get_serializer(obj)
-        return Response(serializer.data)
 
 class TagViewSet(viewsets.ReadOnlyModelViewSet):
     """Представление для тегов."""
@@ -75,89 +55,46 @@ class RecipeViewSet(viewsets.ModelViewSet):
         if self.action in ('create', 'update', 'partial_update'):
             return RecipeCreateSerializer
         return RecipeListSerializer
-    
-    def get_object_or_404_with_error(self, model, pk, object_name="Объект"):
-        try:
-            if isinstance(pk, str) and ("{{" in pk or "}}" in pk):
-                return Response({"errors": f"Неверный ID {object_name.lower()}: {pk}"}, status=status.HTTP_400_BAD_REQUEST)
-            pk = int(pk)
-        except (ValueError, TypeError):
-            return Response({"errors": f"Неверный формат ID {object_name.lower()}: {pk}"}, status=status.HTTP_400_BAD_REQUEST)
-        obj = model.objects.filter(id=pk).first()
-        if not obj:
-            return Response({"errors": f"{object_name} не найден"}, status=status.HTTP_404_NOT_FOUND)
-        return obj
 
-    def destroy(self, request, *args, **kwargs):
-        pk = kwargs.get('pk')
-        obj = self.get_object_or_404_with_error(Recipe, pk, "Рецепт")
-        if isinstance(obj, Response):
-            return obj
-        if obj.author != request.user:
-            return Response({"errors": "Удалять рецепт может только автор."}, status=status.HTTP_403_FORBIDDEN)
-        return super().destroy(request, *args, **kwargs)
+    def create(self, request, *_, **__):
+        """Создание рецепта с возвратом полного сериализованного объекта."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        recipe = serializer.instance
+        response_serializer = RecipeListSerializer(
+            recipe, context={'request': request}
+        )
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
 
-    @handle_api_errors
-    def add_to(self, model, user, pk):
-        """Добавление рецепта в избранное/список покупок с корректным статусом."""
-        try:
-            if isinstance(pk, str) and ('{{' in pk or '}}' in pk):
-                return Response({"errors": f"Неверный ID рецепта: {pk}"}, status=status.HTTP_400_BAD_REQUEST)
-            pk = int(pk)
-            recipe = Recipe.objects.filter(id=pk).first()
-            if not recipe:
-                return Response({"errors": "Рецепт не найден"}, status=status.HTTP_404_NOT_FOUND)
-            if model.objects.filter(user=user, recipe=recipe).exists():
-                if model == Favorite:
-                    return Response({"errors": "Рецепт уже в избранном"}, status=status.HTTP_400_BAD_REQUEST)
-                else:
-                    return Response({"errors": "Рецепт уже в списке покупок"}, status=status.HTTP_400_BAD_REQUEST)
-            model.objects.create(user=user, recipe=recipe)
-            serializer = RecipeShortSerializer(
-                recipe, context={'request': self.request}
-            )
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        except ValueError as exc:
-            return Response({"errors": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-    @handle_api_errors
-    def delete_from(self, model, user, pk):
-        """Удаление рецепта из избранного/списка покупок с корректным статусом."""
-        try:
-            if isinstance(pk, str) and ('{{' in pk or '}}' in pk):
-                return Response({"errors": f"Неверный ID рецепта: {pk}"}, status=status.HTTP_400_BAD_REQUEST)
-            pk = int(pk)
-            recipe = Recipe.objects.filter(id=pk).first()
-            if not recipe:
-                return Response({"errors": "Рецепт не найден"}, status=status.HTTP_404_NOT_FOUND)
-            obj = model.objects.filter(user=user, recipe=recipe)
-            if obj.exists():
-                obj.delete()
-                return Response(status=status.HTTP_204_NO_CONTENT)
-            if model == Favorite:
-                return Response({"errors": "Рецепта нет в избранном"}, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                return Response({"errors": "Рецепта нет в списке покупок"}, status=status.HTTP_400_BAD_REQUEST)
-        except ValueError as exc:
-            return Response({"errors": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    def update(self, request, *args, **kwargs):
+        """Обновление рецепта с возвратом полного сериализованного объекта."""
+        partial = kwargs.get('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        recipe = serializer.instance
+        response_serializer = RecipeListSerializer(
+            recipe, context={'request': request}
+        )
+        return Response(response_serializer.data)
 
     @action(
         detail=True, methods=['post', 'delete'],
         permission_classes=[IsAuthenticated]
     )
-    @handle_api_errors
     def favorite(self, request, pk=None):
         """Добавить или удалить рецепт из избранного."""
+        recipe = get_object_or_404(Recipe, pk=pk)
+        
         if request.method == 'POST':
-            recipe = Recipe.objects.filter(id=pk).first()
-            if not recipe:
-                return Response(
-                    {"errors": "Рецепт не найден"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            if Favorite.objects.filter(
-                user=request.user, recipe=recipe
-            ).exists():
+            if recipe.favorites.filter(user=request.user).exists():
                 return Response(
                     {"errors": "Рецепт уже в избранном"},
                     status=status.HTTP_400_BAD_REQUEST
@@ -167,38 +104,26 @@ class RecipeViewSet(viewsets.ModelViewSet):
                 recipe, context={'request': request}
             )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-        recipe = Recipe.objects.filter(id=pk).first()
-        if not recipe:
-            return Response(
-                {"errors": "Рецепт не найден"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        obj = Favorite.objects.filter(user=request.user, recipe=recipe)
-        if not obj.exists():
+        
+        favorite = recipe.favorites.filter(user=request.user)
+        if not favorite.exists():
             return Response(
                 {"errors": "Рецепта нет в избранном"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        obj.delete()
+        favorite.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
         detail=True, methods=['post', 'delete'],
         permission_classes=[IsAuthenticated]
     )
-    @handle_api_errors
     def shopping_cart(self, request, pk=None):
         """Добавить или удалить рецепт из списка покупок."""
+        recipe = get_object_or_404(Recipe, pk=pk)
+        
         if request.method == 'POST':
-            recipe = Recipe.objects.filter(id=pk).first()
-            if not recipe:
-                return Response(
-                    {"errors": "Рецепт не найден"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            if ShoppingCart.objects.filter(
-                user=request.user, recipe=recipe
-            ).exists():
+            if recipe.shopping_cart.filter(user=request.user).exists():
                 return Response(
                     {"errors": "Рецепт уже в списке покупок"},
                     status=status.HTTP_400_BAD_REQUEST
@@ -208,19 +133,14 @@ class RecipeViewSet(viewsets.ModelViewSet):
                 recipe, context={'request': request}
             )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-        recipe = Recipe.objects.filter(id=pk).first()
-        if not recipe:
-            return Response(
-                {"errors": "Рецепт не найден"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        obj = ShoppingCart.objects.filter(user=request.user, recipe=recipe)
-        if not obj.exists():
+        
+        cart_item = recipe.shopping_cart.filter(user=request.user)
+        if not cart_item.exists():
             return Response(
                 {"errors": "Рецепта нет в списке покупок"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        obj.delete()
+        cart_item.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
@@ -230,9 +150,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
     )
     def get_link(self, request, pk=None):
         """Получить короткую ссылку на рецепт."""
-        recipe = self.get_object_or_404_with_error(Recipe, pk, "Рецепт")
-        if isinstance(recipe, Response):
-            return recipe
+        recipe = get_object_or_404(Recipe, pk=pk)
         short_link = request.build_absolute_uri(f"/recipes/{pk}/")
         return Response({"short-link": short_link})
 
@@ -268,67 +186,3 @@ class RecipeViewSet(viewsets.ModelViewSet):
             'shopping_list.txt',
             'text/plain'
         )
-
-    def list(self, request, *args, **kwargs):
-        """Получить список рецептов с фильтрацией и пагинацией."""
-        queryset = self.filter_queryset(self.get_queryset())
-        author = request.query_params.get('author')
-        if author:
-            queryset = queryset.filter(author__id=author)
-        is_favorited = request.query_params.get('is_favorited')
-        if is_favorited == '1':
-            if request.user.is_authenticated:
-                queryset = queryset.filter(favorites__user=request.user)
-            else:
-                queryset = queryset.none()
-        is_in_shopping_cart = request.query_params.get('is_in_shopping_cart')
-        if is_in_shopping_cart == '1':
-            if request.user.is_authenticated:
-                queryset = queryset.filter(shopping_cart__user=request.user)
-            else:
-                queryset = queryset.none()
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    def create(self, request, *args, **kwargs):
-        """Создать новый рецепт."""
-        serializer = self.get_serializer(
-            data=request.data, context={'request': request}
-        )
-        try:
-            serializer.is_valid(raise_exception=True)
-            self.perform_create(serializer)
-        except ValidationError as exc:
-            return Response(
-                {'errors': exc.detail},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except Exception as exc:
-            return Response(
-                {'errors': str(exc)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        data = RecipeListSerializer(
-            serializer.instance, context={'request': request}
-        ).data
-        headers = self.get_success_headers(serializer.data)
-        return Response(data, status=status.HTTP_201_CREATED, headers=headers)
-
-    def update(self, request, *args, **kwargs):
-        """Обновить рецепт и вернуть ответ по схеме RecipeListSerializer."""
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial, context={'request': request})
-        try:
-            serializer.is_valid(raise_exception=True)
-            self.perform_update(serializer)
-        except ValidationError as exc:
-            return Response({'errors': exc.detail}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as exc:
-            return Response({'errors': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        data = RecipeListSerializer(serializer.instance, context={'request': request}).data
-        return Response(data, status=status.HTTP_200_OK)

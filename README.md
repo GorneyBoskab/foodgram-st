@@ -80,7 +80,6 @@ http://localhost/api/docs/
 - Скачивание списка покупок в формате TXT
 - Админ-панель для управления контентом
 
-## CI/CD
+## Postman test 
 
-Настроен автоматический деплой на сервер при пуше в основную ветку через GitHub Actions.
-
+Все тесты проходит, postman_collection/diploma.postman_test_run.json

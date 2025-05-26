@@ -1,14 +1,17 @@
-"""Представления для работы с пользователями через API."""
-from rest_framework import status
+﻿from rest_framework import status, serializers
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from djoser.views import UserViewSet as DjoserUserViewSet
-from rest_framework import serializers
+from django.shortcuts import get_object_or_404
 
 from users.models import User, Follow
-from api.serializers import CustomUserCreateSerializer, CustomUserSerializer
-from django.shortcuts import get_object_or_404
+from api.serializers import (
+    CustomUserCreateSerializer,
+    CustomUserSerializer,
+    SubscriptionSerializer,
+    UserRegistrationResponseSerializer
+)
 from api.utils import handle_api_errors
 from api.exceptions import (
     CannotSubscribeToYourself, AlreadySubscribed, NotSubscribed
@@ -21,7 +24,7 @@ class UserViewSet(DjoserUserViewSet):
     queryset = User.objects.all()
 
     def get_permissions(self):
-        """Возвращает соответствующие разрешения в зависимости от действия."""
+        """озвращает соответствующие разрешения в зависимости от действия."""
         if self.action in [
             'me', 'set_password', 'subscribe', 'subscriptions', 'avatar'
         ]:
@@ -29,19 +32,16 @@ class UserViewSet(DjoserUserViewSet):
         return [AllowAny()]
 
     def get_serializer_class(self):
-        """Возвращает сериализатор в зависимости от действия."""
+        """озвращает сериализатор в зависимости от действия."""
         if self.action == 'create':
             return CustomUserCreateSerializer
         elif self.action in ['subscriptions', 'subscribe']:
-            from api.serializers import SubscriptionSerializer
             return SubscriptionSerializer
         return CustomUserSerializer
 
     @action(detail=False, methods=['get'])
     def me(self, request):
-        """
-        Возвращает данные текущего пользователя с корректным avatar.
-        """
+        """озвращает данные текущего пользователя с корректным avatar."""
         serializer = self.get_serializer(
             request.user, context={'request': request}
         )
@@ -52,13 +52,13 @@ class UserViewSet(DjoserUserViewSet):
 
     @action(detail=False, methods=['post'])
     def set_password(self, request):
-        """Изменяет пароль пользователя."""
+        """зменяет пароль пользователя."""
         if (
             'current_password' not in request.data or
             'new_password' not in request.data
         ):
             return Response(
-                {"errors": "Необходимы current_password и new_password"},
+                {"errors": "еобходимы current_password и new_password"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -66,39 +66,44 @@ class UserViewSet(DjoserUserViewSet):
             request.data['current_password']
         ):
             return Response(
-                {"errors": "Неверный пароль"},
+                {"errors": "еверный пароль"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         self.request.user.set_password(request.data['new_password'])
         self.request.user.save()
-
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['post', 'delete'], url_path='subscribe')
     @handle_api_errors
-    def subscribe(self, request, pk=None, id=None):
+    def subscribe(self, request, user_id=None, pk=None, **kwargs):
         """Создать/удалить подписку на автора."""
-        if pk is None and id is not None:
-            pk = id
-        author = get_object_or_404(User, id=pk)
+        author_id = user_id or pk
+        if not author_id:
+            author_id = (
+                kwargs.get('id') or
+                kwargs.get('pk') or
+                kwargs.get('user_id')
+            )
+        author = get_object_or_404(User, pk=author_id)
         user = request.user
 
         if request.method == 'POST':
             if user == author:
                 raise CannotSubscribeToYourself()
 
-            if Follow.objects.filter(user=user, author=author).exists():
+            if user.follower.filter(author=author).exists():
                 raise AlreadySubscribed()
 
             Follow.objects.create(user=user, author=author)
-            from api.serializers import SubscriptionSerializer
             serializer = SubscriptionSerializer(
                 author, context={'request': request}
             )
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(
+                serializer.data, status=status.HTTP_201_CREATED
+            )
 
-        subscription = Follow.objects.filter(user=user, author=author)
+        subscription = user.follower.filter(author=author)
         if not subscription.exists():
             raise NotSubscribed()
         subscription.delete()
@@ -106,19 +111,18 @@ class UserViewSet(DjoserUserViewSet):
 
     @action(detail=False, methods=['get'])
     def subscriptions(self, request):
-        """Возвращает список подписок пользователя."""
+        """озвращает список подписок пользователя."""
         user = request.user
-        follows = Follow.objects.filter(user=user).select_related('author')
-        authors = [follow.author for follow in follows]
+        authors = User.objects.filter(following__user=user)
         page = self.paginate_queryset(authors)
-        from api.serializers import SubscriptionSerializer
-        serializer_class = SubscriptionSerializer
+        
         if page is not None:
-            serializer = serializer_class(
+            serializer = SubscriptionSerializer(
                 page, many=True, context={'request': request}
             )
             return self.get_paginated_response(serializer.data)
-        serializer = serializer_class(
+        
+        serializer = SubscriptionSerializer(
             authors, many=True, context={'request': request}
         )
         return Response(serializer.data)
@@ -129,22 +133,19 @@ class UserViewSet(DjoserUserViewSet):
         permission_classes=[IsAuthenticated]
     )
     def avatar(self, request):
-        """Устанавливает или удаляет аватар пользователя."""
-        if not request.user.is_authenticated:
-            return Response(
-                {"detail": "Учётные данные не были предоставлены."},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
+        """станавливает или удаляет аватар пользователя."""
         if request.method == 'DELETE':
             request.user.avatar = None
             request.user.save(update_fields=['avatar'])
             return Response(status=status.HTTP_204_NO_CONTENT)
+
         avatar_data = request.data.get('avatar')
         if not avatar_data:
             return Response(
-                {"errors": "Файл аватара не передан."},
+                {"errors": "айл аватара не передан."},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
         serializer = self.get_serializer(
             request.user,
             data={'avatar': avatar_data},
@@ -163,17 +164,16 @@ class UserViewSet(DjoserUserViewSet):
         user_data = CustomUserSerializer(
             request.user, context={'request': request}
         ).data
-        return Response({"avatar": user_data["avatar"]}, status=status.HTTP_200_OK)
+        return Response(
+            {"avatar": user_data["avatar"]},
+            status=status.HTTP_200_OK
+        )
 
     def create(self, request):
-        """Создает нового пользователя.
-
-        Возвращает только поля, требуемые по спецификации регистрации.
-        """
+        """Создает нового пользователя."""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         user = User.objects.get(id=serializer.data['id'])
-        from api.serializers import UserRegistrationResponseSerializer
         data = UserRegistrationResponseSerializer(user).data
         return Response(data, status=status.HTTP_201_CREATED)
