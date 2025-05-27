@@ -316,42 +316,12 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         tags = validated_data.pop('tags', None)
-        ingredients_data = validated_data.pop('ingredients', None)
+        ingredients_data = validated_data.pop('ingredients')
         if tags is not None:
             instance.tags.set(tags)
-        if ingredients_data is not None:
-            instance.recipeingredient_set.all().delete()
-            self._save_ingredients(instance, ingredients_data)
+        instance.recipeingredient_set.all().delete()
+        self._save_ingredients(instance, ingredients_data)
         return super().update(instance, validated_data)
-
-
-class FollowSerializer(CustomUserSerializer):
-    """Сериализатор для подписок."""
-    
-    recipes = serializers.SerializerMethodField()
-    recipes_count = serializers.SerializerMethodField()
-
-    class Meta(CustomUserSerializer.Meta):
-        fields = CustomUserSerializer.Meta.fields + ('recipes', 'recipes_count')
-
-    def get_recipes(self, obj):
-        """Метод для получения рецептов автора."""
-        request = self.context.get('request')
-        limit = request.query_params.get('recipes_limit') if request else None
-        recipes = obj.recipes.all()
-        if limit:
-            try:
-                recipes = recipes[:int(limit)]
-            except (ValueError, TypeError):
-                pass
-        serializer = RecipeShortSerializer(
-            recipes, many=True, context=self.context
-        )
-        return serializer.data
-
-    def get_recipes_count(self, obj):
-        """Метод для получения количества рецептов автора."""
-        return obj.recipes.count()
 
 
 class UserRegistrationResponseSerializer(serializers.ModelSerializer):
